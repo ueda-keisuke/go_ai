@@ -1,5 +1,5 @@
 import copy
-from dlgo.gotypes import Player
+from dlgo.gotypes import Player, Point
 
 
 # is_play, is_pass, is_resignのいずれかを選べる
@@ -83,13 +83,17 @@ class Board():
                         adjacent_opposite_color.append(neighbor_string)
             new_string = GoString(player, [point], liberties)
 
+            # 隣接する連をマージする
             for same_color_string in adjacent_same_color:
                 new_string = new_string.merged_with(same_color_string)
             for new_string_point in new_string.stones:
                 self._grid[new_string_point] = new_string
 
+            # 敵の色の隣接する連の呼吸点を減らす
             for other_color_string in adjacent_opposite_color:
                 other_color_string.remove_liberty(point)
+
+            # 呼吸点がゼロなら取り除く
             for other_color_string in adjacent_opposite_color:
                 if other_color_string.num_liberties == 0:
                     self._remove_string(other_color_string)
@@ -107,7 +111,7 @@ class Board():
 
     # 連全体を返す
     # 連かNoneを返す
-    def get_go_string(self, point):
+    def get_go_string(self, point: Point):
         string = self._grid.get(point)
         if string is None:
             return None
@@ -115,6 +119,7 @@ class Board():
 
     def _remove_string(self, string):
         for point in string.stones:
+            # 連を取り除いて呼吸点を追加する
             for neighbor in point.neighbors():
                 neighbor_string = self._grid.get(neighbor)
                 if neighbor_string is None:
@@ -122,3 +127,52 @@ class Board():
                 if neighbor_string is not string:
                     neighbor_string.add_liberty(point)
             self._grid[point] = None
+
+
+class GameState():
+    def __init__(self, board :Board, next_player :Player, previous, move: Move):
+        self.board = board
+        self.next_player = next_player
+        self.previous_state = previous
+        self.last_move = move
+
+    # 着手を適用したあと新しいGameStateを返す
+    def apply_move(self, move: Move):
+        if move.is_play:
+            next_board = copy.deepcopy(self.board)
+            next_board.place_stone(self.next_player, move.point)
+        else:
+            next_board = self.board
+
+        return GameState(next_board, self.next_player.other, self, move)
+
+    @classmethod
+    def new_game(cls, board_size :int):
+        if isinstance(board_size, int):
+            board_size = (board_size, board_size)
+        board = Board(*board_size)
+        return GameState(board, Player.black, None, None)
+
+    def is_over(self):
+        if self.last_move is None:
+            return False
+        if self.last_move.is_resign:
+            return True
+
+        second_last_move :Move = self.previous_state.last_move
+        if second_last_move is None:
+            return False
+
+        return self.last_move.is_pass and second_last_move.is_pass
+
+    # 自殺手のルールを強制する
+    def is_move_self_capture(self, player, move):
+        if not move.is_play:
+            return False
+
+        next_board = copy.deepcopy(self.board)
+        next_board.place_stone(player, move.point)
+        new_string = next_board.get_go_string(move.point)
+
+        return new_string.num_liberties == 0
+
